@@ -31,6 +31,11 @@ prepare_source() {
     mkdir -p /usr/local/src/gvm10;
     chown $USER:$USER /usr/local/src/gvm10;
     cd /usr/local/src/gvm10;
+    #git clone https://github.com/greenbone/gvmd;
+    #git clone https://github.com/greenbone/gsa;
+    #git clone https://github.com/greenbone/openvas;
+    #git clone https://github.com/greenbone/gvm-libs;
+    #git clone https://github.com/greenbone/openvas-smb
     # Download source
     wget -O gvm-libs-10.0.0.tar.gz https://github.com/greenbone/gvm-libs/archive/v10.0.0.tar.gz;
     wget -O openvas-scanner-6.0.0.tar.gz https://github.com/greenbone/openvas-scanner/archive/v6.0.0.tar.gz;
@@ -38,21 +43,23 @@ prepare_source() {
     wget -O gsa-8.0.0.tar.gz https://github.com/greenbone/gsa/archive/v8.0.0.tar.gz;
     wget -O openvas-smb-1.0.5.tar.gz https://github.com/greenbone/openvas-smb/archive/v1.0.5.tar.gz;
     wget -O ospd-1.3.2.tar.gz https://github.com/greenbone/ospd/archive/v1.3.2.tar.gz
-    cd /usr/local/src/gvm10;
     find *.gz | xargs -n1 tar zxvfp;
+    sync;
     chown -R $USER:$USER /usr/local/src/gvm10;
+    # Create folder to use for system information
+    mkdir /mnt/backup/$HOSTNAME;
 }
 
 install_gvm_libs() {
     cd /usr/local/src/gvm10;
-    cd gvm-libs-10.0.0;
+    gvm-libs-10.0.0;
     mkdir build;
     cd build;
     cmake ..;
     make;
     make doc-full;
     make install;
-    cd /usr/local/src/gvm10;
+    sync;
 }
 
 install_openvas_smb() {
@@ -64,7 +71,7 @@ install_openvas_smb() {
     cmake ..;
     make;
     make install;
-    cd /usr/local/src/gvm10;
+    sync;
 }
 
 install_openvas() {
@@ -77,7 +84,6 @@ install_openvas() {
     make;
     make doc-full;
     make install;
-    cd /usr/local/src/gvm10;
     # Fix Redis for OpenVas
     
     sudo sh -c 'cat << EOF > /etc/redis/redis.conf
@@ -179,7 +185,7 @@ EOF"
 }
 
 install_gvm() {
-    cd /usr/local/src/gvm10
+    cd /usr/local/src/gvm10;
     # Build Manager
     cd gvmd-8.0.0;
     mkdir build;
@@ -188,13 +194,12 @@ install_gvm() {
     make;
     make doc-full;
     make install;
-    cd /usr/local/src/gvm10;
+    sync;
 }
 
 install_gsa() {
     ## Install GSA
     cd /usr/local/src/gvm10
-    
     # GSA prerequisites
     curl --silent --show-error https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -;
     echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list;
@@ -212,11 +217,6 @@ install_gsa() {
     make doc-full;
     make install;
     sync;
-    export GVM_CERTIFICATE_LIFETIME=3650;
-    /usr/local/bin/gvm-manage-certs -a;
-    echo "User admin for GVM $HOSTNAME " >> /mnt/backup/readme-users.txt;
-    /usr/local/sbin/gvmd --create-user=admin >> /mnt/backup/readme-users.txt;
-    cd /usr/local/src/gvm10
 }
 
 install_gvm_tools() {
@@ -253,6 +253,12 @@ EOF"
 }
 
 configure_gvm() {
+    # Create Certificates and admin user
+    export GVM_CERTIFICATE_LIFETIME=3650;
+    /usr/local/bin/gvm-manage-certs -a;
+    echo "User admin for GVM $HOSTNAME " >> /mnt/backup/readme-users.txt;
+    /usr/local/sbin/gvmd --create-user=admin >> /mnt/backup/readme-users.txt;
+    
     # Create unit file for gvmd
     sudo sh -c 'cat << EOF > /lib/systemd/system/gvmd.service
 [Unit]
@@ -278,6 +284,12 @@ EOF'
 }
 
 configure_gvm_slave() {
+    # Create Certificates and admin user
+    export GVM_CERTIFICATE_LIFETIME=3650;
+    /usr/local/bin/gvm-manage-certs -a;
+    echo "User admin for GVM $HOSTNAME " >> /mnt/backup/readme-users.txt;
+    /usr/local/sbin/gvmd --create-user=admin >> /mnt/backup/readme-users.txt;
+    
     # Create unit file for gvmd on slave
     sudo sh -c 'cat << EOF > /lib/systemd/system/gvmd.service
 [Unit]
@@ -404,13 +416,12 @@ main() {
         install_openvas_smb;
         install_openvas;
         install_gvm;
+        configure_gvm_slave;
         install_gvm_tools;
         
         # Configuration of installed components
-        configure_gvm_slave;
         configure_openvas;
         configure_greenbone_updates;
-        mkdir /mnt/backup/$HOSTNAME;
         cp /usr/local/var/lib/gvm/CA/cacert.pem /mnt/backup/$HOSTNAME;
         echo $HOSTNAME: $(date) | sudo tee -a /mnt/backup/servers;
     fi
