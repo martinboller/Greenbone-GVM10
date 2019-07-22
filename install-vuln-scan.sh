@@ -52,7 +52,7 @@ prepare_source() {
 
 install_gvm_libs() {
     cd /usr/local/src/gvm10;
-    gvm-libs-10.0.0;
+    cd gvm-libs-10.0.0;
     mkdir build;
     cd build;
     cmake ..;
