@@ -25,12 +25,12 @@ install_prerequisites() {
     curl -sL https://deb.nodesource.com/setup_8.x | sudo bash -;
     apt-get update;
     apt-get -y install nodejs;
-    mkdir -p /usr/local/src/gvm10;
-    sudo chown $USER:$USER gvm10;
 }
 
 prepare_source() {    
-    cd /usr/local/src/gvm10
+    mkdir -p /usr/local/src/gvm10;
+    chown $USER:$USER /usr/local/src/gvm10;
+    cd /usr/local/src/gvm10;
     # Download source
     wget -O gvm-libs-10.0.0.tar.gz https://github.com/greenbone/gvm-libs/archive/v10.0.0.tar.gz;
     wget -O openvas-scanner-6.0.0.tar.gz https://github.com/greenbone/openvas-scanner/archive/v6.0.0.tar.gz;
@@ -40,6 +40,7 @@ prepare_source() {
     wget -O ospd-1.3.2.tar.gz https://github.com/greenbone/ospd/archive/v1.3.2.tar.gz
     cd /usr/local/src/gvm10;
     find *.gz | xargs -n1 tar zxvfp;
+    chown -R $USER:$USER /usr/local/src/gvm10;
 }
 
 install_gvm_libs() {
@@ -79,7 +80,7 @@ install_openvas() {
     cd /usr/local/src/gvm10;
     # Fix Redis for OpenVas
     
-    sudo sh -c "cat << EOF > /etc/redis/redis.conf
+    sudo sh -c 'cat << EOF > /etc/redis/redis.conf
 ## REDIS Configuration for openvassd
 ## 2019-06-23 - Martin
 ################################## NETWORK #####################################
@@ -139,7 +140,7 @@ slowlog-max-len 128
 latency-monitor-threshold 0
 
 ############################# EVENT NOTIFICATION ##############################
-#notify-keyspace-events ""
+notify-keyspace-events ""
 
 ############################### ADVANCED CONFIG ###############################
 hash-max-ziplist-entries 512
@@ -156,25 +157,13 @@ client-output-buffer-limit slave 256mb 64mb 60
 client-output-buffer-limit pubsub 32mb 8mb 60
 hz 10
 aof-rewrite-incremental-fsync yes
-EOF"
+EOF'
     sysctl -w net.core.somaxconn=1024;
     sysctl vm.overcommit_memory=1;
     echo "net.core.somaxconn=1024"  >> /etc/sysctl.conf;
     echo "vm.overcommit_memory=1" >> /etc/sysctl.conf;
-    sudo sh -c "cat << EOF > /etc/systemd/system/disable-thp.service
-[Unit]
-Description=Disable Transparent Huge Pages (THP)
-
-[Service]
-Type=simple
-ExecStart=/bin/sh -c "echo 'never' > /sys/kernel/mm/transparent_hugepage/enabled && echo 'never' > /sys/kernel/mm/transparent_hugepage/defrag"
-
-[Install]
-WantedBy=multi-user.target
-EOF"
-    systemctl daemon-reload;
-    systemctl start disable-thp;
-    systemctl enable disable-thp;
+    echo 'never' > /sys/kernel/mm/transparent_hugepage/enabled;
+    echo 'never' > /sys/kernel/mm/transparent_hugepage/defrag;
     systemctl restart redis-server;
     sudo sh -c "cat << EOF > /usr/local/etc/openvas/openvassd.conf
 db_address = /var/run/redis/redis-server.sock
@@ -185,7 +174,8 @@ EOF"
     # Reload all modules
     ldconfig;
     # Start Openvassd
-    openvassd;
+    /usr/local/sbin/openvassd -f --only-cache --config-file=/usr/local/etc/openvas/openvassd.conf;
+    sleep 60;
 }
 
 install_gvm() {
@@ -203,7 +193,9 @@ install_gvm() {
 
 install_gsa() {
     ## Install GSA
-    # GSA Configuration
+    cd /usr/local/src/gvm10
+    
+    # GSA prerequisites
     curl --silent --show-error https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -;
     echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list;
     sudo apt-get update;
@@ -219,11 +211,12 @@ install_gsa() {
     make;
     make doc-full;
     make install;
-    cd /usr/local/src/gvm10;
+    sync;
     export GVM_CERTIFICATE_LIFETIME=3650;
-    gvm-manage-certs -a;
+    /usr/local/bin/gvm-manage-certs -a;
     echo "User admin for GVM $HOSTNAME " >> /mnt/backup/readme-users.txt;
-    gvmd --create-user=admin >> /mnt/backup/readme-users.txt;
+    /usr/local/sbin/gvmd --create-user=admin >> /mnt/backup/readme-users.txt;
+    cd /usr/local/src/gvm10
 }
 
 install_gvm_tools() {
@@ -255,14 +248,15 @@ WantedBy=multi-user.target
 Alias=greenbone-openvas-scanner.service
 EOF"
     sync;
+    systemctl daemon-reload;
     systemctl enable openvassd.service;
 }
 
 configure_gvm() {
     # Create unit file for gvmd
-    sudo sh -c "cat << EOF > /lib/systemd/system/gvmd.service
+    sudo sh -c 'cat << EOF > /lib/systemd/system/gvmd.service
 [Unit]
-Description=Start Greenbone Vulnerability Manager Deamon
+Description=Start Greenbone Vulnerability Manager Daemon
 
 [Service]
 Type=forking
@@ -277,10 +271,37 @@ KillMode=mixed
 [Install]
 WantedBy=multi-user.target
 Alias=greenbone-vulnerability-manager.service
-EOF"
+EOF'
     sync;
+    systemctl daemon-reload;
     systemctl enable gvmd.service;
 }
+
+configure_gvm_slave() {
+    # Create unit file for gvmd on slave
+    sudo sh -c 'cat << EOF > /lib/systemd/system/gvmd.service
+[Unit]
+Description=Start Greenbone Vulnerability Manager Daemon
+
+[Service]
+Type=forking
+PIDFile=/usr/local/var/run/gvmd.pid
+ExecStart=-/usr/local/sbin/gvmd --database=/usr/local/var/lib/gvm/gvmd/gvmd.db --listen=0.0.0.0 --port=9391
+
+ExecReload=/bin/kill -HUP $MAINPID
+# Kill the main process with SIGTERM and after TimeoutStopSec (defaults to
+# 1m30) kill remaining processes with SIGKILL
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target
+Alias=greenbone-vulnerability-manager.service
+EOF'    
+    sync;
+    systemctl daemon-reload;
+    systemctl enable gvmd.service;
+}
+
 
 configure_gsa() {
     # Create unit file for gsad
@@ -303,6 +324,7 @@ WantedBy=multi-user.target
 Alias=greenbone-security-assistant.service
 EOF"
     sync;
+    systemctl daemon-reload;
     systemctl enable gsad.service;
 }
 
@@ -326,9 +348,10 @@ EOF"
 }
 
 start_services() {
-    systemctl start gvmd.service;
-    systemctl start openvassd.service;
-    systemctl start gsad.service;    
+    systemctl daemon-reload;
+    systemctl restart gvmd.service;
+    systemctl restart openvassd.service;
+    systemctl restart gsad.service;    
 }
 
 
@@ -352,23 +375,24 @@ main() {
         # Shared components
         install_prerequisites;
         prepare_source;
-        install_gvm_libs;
-        install_openvas_smb;
-        install_openvas;
-        install_gvm;
-        configure_openvas;
-        configure_gvm;
-        configure_greenbone_updates;
-
+        
         # Server specific elements
     if [ "$HOSTNAME" = "manticore" ]; 
         then
         # Installation of specific components
         # This is the master server so install GSAD
+        install_gvm_libs;
+        install_openvas_smb;
+        install_openvas;
+        install_gvm;
+        install_gvm_tools;
         install_gsa;        
 
         # Configuration of installed components
+        configure_gvm;
+        configure_openvas;
         configure_gsa;
+        configure_greenbone_updates;
         configure_report_cleanup;
         echo $HOSTNAME: $(date) | sudo tee -a /mnt/backup/servers;
     fi
@@ -376,8 +400,16 @@ main() {
     if [ "$HOSTNAME" = "aboleth" ]; 
         then
         # Installation of specific components
+        install_gvm_libs;
+        install_openvas_smb;
+        install_openvas;
+        install_gvm;
+        install_gvm_tools;
         
         # Configuration of installed components
+        configure_gvm_slave;
+        configure_openvas;
+        configure_greenbone_updates;
         mkdir /mnt/backup/$HOSTNAME;
         cp /usr/local/var/lib/gvm/CA/cacert.pem /mnt/backup/$HOSTNAME;
         echo $HOSTNAME: $(date) | sudo tee -a /mnt/backup/servers;
@@ -392,18 +424,17 @@ main() {
         echo $HOSTNAME: $(date) | sudo tee -a /mnt/backup/servers;
     fi
 
-    apt-get -y install --fix-policy;
     start_services;
+    apt-get -y install --fix-policy;
 }
 
 main;
 
 exit 0;
 
-
 ##########################################################################################
 # Post install instructions
-# This works:
+# 
 # On master: Create GMP scanner and credentials using account on slave
 # copy the cacert.pem file from slave(s)
 # Get the ID of the newly created scanner (on master), then modify the scanner to accept the cert from the slave
