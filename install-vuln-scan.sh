@@ -181,7 +181,6 @@ EOF"
     ldconfig;
     # Start Openvassd
     /usr/local/sbin/openvassd -f --only-cache --config-file=/usr/local/etc/openvas/openvassd.conf;
-    sleep 60;
 }
 
 install_gvm() {
