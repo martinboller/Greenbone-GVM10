@@ -25,6 +25,9 @@ install_prerequisites() {
     curl -sL https://deb.nodesource.com/setup_8.x | sudo bash -;
     apt-get update;
     apt-get -y install nodejs;
+    # Disable THP (or else redis will complain)
+    echo 'never' > /sys/kernel/mm/transparent_hugepage/enabled;
+    echo 'never' > /sys/kernel/mm/transparent_hugepage/defrag;
 }
 
 prepare_source() {    
@@ -168,9 +171,6 @@ EOF'
     sysctl vm.overcommit_memory=1;
     echo "net.core.somaxconn=1024"  >> /etc/sysctl.conf;
     echo "vm.overcommit_memory=1" >> /etc/sysctl.conf;
-    systemctl restart redis-server;
-    echo 'never' > /sys/kernel/mm/transparent_hugepage/enabled;
-    echo 'never' > /sys/kernel/mm/transparent_hugepage/defrag;
     systemctl restart redis-server;
     sudo sh -c "cat << EOF > /usr/local/etc/openvas/openvassd.conf
 db_address = /var/run/redis/redis-server.sock
