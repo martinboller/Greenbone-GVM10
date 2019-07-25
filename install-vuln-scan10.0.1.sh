@@ -168,6 +168,7 @@ EOF'
     sysctl vm.overcommit_memory=1;
     echo "net.core.somaxconn=1024"  >> /etc/sysctl.conf;
     echo "vm.overcommit_memory=1" >> /etc/sysctl.conf;
+    systemctl restart redis-server;
     echo 'never' > /sys/kernel/mm/transparent_hugepage/enabled;
     echo 'never' > /sys/kernel/mm/transparent_hugepage/defrag;
     systemctl restart redis-server;
